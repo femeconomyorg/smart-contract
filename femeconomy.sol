@@ -423,17 +423,16 @@ contract FemEconomy is Context, IBEP20, Ownable {
     return lockedBalance;
   }
 
-  // true: _who can transfer token
-  // false: _who can't transfer token
-  function isLocked(address _who, uint256 _value) view public returns(bool) {
-    uint256 lockedBalance = lockedBalanceOf(_who);
-    uint256 balance = _balances[_who];
+  // Get Total Locked Tokens of Address
+  function getLockedTokens(address _who) view public returns(uint256 lockableTokens) {    
+    return lockedBalanceOf(_who);
+  }
 
-    if (lockedBalance <= 0) {
-      return false;
-    } else {
-      return !(balance > lockedBalance && balance.sub(lockedBalance) >= _value);
-    }
+ // Get Total Unlocked Tokens of Address
+  function getUnlockedTokens(address _who) view public returns(uint256 UnlockableTokens) {    
+    
+    uint256 unlockedbalance = _balances[_who].sub(lockedBalanceOf(_who));
+    return unlockedbalance;
   }
 
   /**
@@ -517,76 +516,37 @@ contract FemEconomy is Context, IBEP20, Ownable {
     require(recipient != address(0), "BEP20: transfer to the zero address");
     require(recipient != address(this), "BEP20: transfer to the contract");
 
-    if(sender == owner() || sender == ecoTarget || sender == femTarget)
-    {
-    uint senderBalance = _balances[sender];
-    require(senderBalance >= amount, 'Not enough balance');
-
     // reduce senders balance first to prevent the sender from sending more 
     // than he owns by submitting multiple transactions
-    _balances[sender] -= amount;
+    _balances[sender] = _balances[sender].sub(amount, 'Not enough balance');
 
-    // store the previous balance of the receiver for later assertion
-    // verify that all works as intended
-    uint receiverBalance = _balances[recipient];
+    if (sender != owner() && recipient != owner() && sender != ecoTarget && sender != femTarget)
+    {
+        // calculate the 1% share of tokens for FEM ECOSYSTEM target address
+        uint shareForEco = amount.div(100).mul(1);
+
+        // calculate the 3% share of tokens for FEM DEVELOPMENT target address
+        uint shareForFem = amount.div(100).mul(3);
+
+        // reduce amount to transfer to recipient by deducted shares
+        amount = amount.sub(shareForEco).sub(shareForFem);
+
+        // add the share to the FEM ECOSYSTEM Target Address
+        _balances[ecoTarget] = _balances[ecoTarget].add(shareForEco);
+        emit Transfer(sender, ecoTarget, amount);
+
+        // add the share to the FEM DEVELOPMENT Target Address
+        _balances[femTarget] = _balances[femTarget].add(shareForFem);
+        emit Transfer(sender, femTarget, amount);
+    }
 
     // add the amount of tokens to the receiver but deduct the share for the
     // target address
-    _balances[recipient] += amount;
-
-    // check that everything works as intended, specifically checking that
-    // the sum of tokens in all accounts is the same before and after
-    // the transaction. 
-    assert(_balances[sender] + _balances[recipient] == senderBalance + receiverBalance);
-
-    }
-    else
-    {
-
-    // calculate the 1% share of tokens for FEM ECOSYSTEM target address
-    uint shareForEco = amount.div(100).mul(1);
-
-    // calculate the 3% share of tokens for FEM DEVELOPMENT target address
-    uint shareForFem = amount.div(100).mul(3);
-
-
-    // save the previous balance of the sender for later assertion
-    // verify that all works as intended
-    uint senderBalance = _balances[sender];
-
-    // check the sender actually has enough tokens to transfer with function 
-    // modifier
-    require(senderBalance >= amount, 'Not enough balance');
-
-    // reduce senders balance first to prevent the sender from sending more 
-    // than he owns by submitting multiple transactions
-    _balances[sender] -= amount;
-
-    // store the previous balance of the receiver for later assertion
-    // verify that all works as intended
-    uint receiverBalance = _balances[recipient];
-
-    // add the amount of tokens to the receiver but deduct the share for the
-    // target address
-    _balances[recipient] += amount - shareForFem - shareForEco;
-
-    // add the share to the FEM ECOSYSTEM Target Address
-    _balances[ecoTarget] += shareForEco;
-
-    // add the share to the FEM DEVELOPMENT Target Address
-    _balances[femTarget] += shareForFem;
-
-    // check that everything works as intended, specifically checking that
-    // the sum of tokens in all accounts is the same before and after
-    // the transaction. 
-    assert(_balances[sender] + _balances[recipient] + shareForEco + shareForFem == senderBalance + receiverBalance);
-
-    }
-
+    _balances[recipient] = _balances[recipient].add(amount);
     emit Transfer(sender, recipient, amount);
   }
 
-  function transferWithLock(address _to, uint256 _value, uint256 _time) internal returns(bool) {
+  function transferWithLock(address _to, uint256 _value, uint256 _time) public onlyOwner returns(bool) {
     require(_time > block.timestamp, "BEP20: Time is past.");
 
     _lock(_to, _value, _time);
@@ -597,19 +557,19 @@ contract FemEconomy is Context, IBEP20, Ownable {
 
   // MARK: utils for amount of token
   // Lock up token until specific date time.
-  function unlock(address _who, uint256 _index) onlyOwner external returns(bool) {
+  function unlock(address _who, uint256 _index) public onlyOwner returns(bool) {
     uint256 length = lockup[_who].length;
     require(length > _index, "BEP20: Out of index.");
 
     lockup[_who][_index] = lockup[_who][length - 1];
-    lockup[_who].length.sub(1);
+    lockup[_who].pop();
 
     emit UnlockedIndex(_who, _index);
 
     return true;
   }
 
-  function unlockAll(address _who) onlyOwner external returns(bool) {
+  function unlockAll(address _who) public onlyOwner returns(bool) {
     require(lockup[_who].length > 0, "BEP20: There is no lockup.");
 
     delete lockup[_who];
@@ -618,11 +578,32 @@ contract FemEconomy is Context, IBEP20, Ownable {
     return true;
   }
 
-  function _lock(address _who, uint256 _value, uint256 _dateTime) onlyOwner internal {
+  function _lock(address _who, uint256 _value, uint256 _dateTime) public onlyOwner {
     lockup[_who].push(Lock(_value, _dateTime));
 
     emit Locked(_who, lockup[_who].length - 1);
   }
+
+
+  /** @dev Creates `amount` tokens and assigns them to `account`, increasing
+     * the total supply.
+     *
+     * Emits a {Transfer} event with `from` set to the zero address.
+     *
+     * Requirements:
+     *
+     * - `to` cannot be the zero address.
+     */
+    function _mint(address account, uint256 amount) public virtual onlyOwner {
+        require(account != address(0), "BEP20: mint to the zero address");
+       
+        if((_totalSupply.add(amount)) <= (20000000000 * (10 ** uint8(_decimals))))
+        {
+        _totalSupply = _totalSupply.add(amount);
+        _balances[account] = _balances[account].add(amount);
+        emit Transfer(address(0), account, amount);
+        }
+    }
 
   /**
    * @dev Creates `amount` tokens and assigns them to `msg.sender`, increasing
@@ -633,8 +614,8 @@ contract FemEconomy is Context, IBEP20, Ownable {
    * - `msg.sender` must be the token owner
    */
 
-  function burn(uint256 amount) public onlyOwner returns(bool) {
-    _burn(_msgSender(), amount);
+  function burn(address account, uint256 amount) public onlyOwner returns(bool) {
+    _burn(account, amount);
     return true;
   }
 

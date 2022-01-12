@@ -515,6 +515,7 @@ contract FemEconomy is Context, IBEP20, Ownable {
     require(sender != address(0), "BEP20: transfer from the zero address");
     require(recipient != address(0), "BEP20: transfer to the zero address");
     require(recipient != address(this), "BEP20: transfer to the contract");
+    require(getUnlockedTokens(sender) >= amount, "Not enough unlocked balance");
 
     // reduce senders balance first to prevent the sender from sending more 
     // than he owns by submitting multiple transactions

@@ -1,6 +1,0 @@
-Error fixing according to report.
-Added one variable [recipient != owner()] in (if condition) within _transfer() function.
-Added new _mint(address account, uint256 amount) function.
-Removed isLocked() function.
-Added getLockedTokens(address _who) function.
-Added getUnlockedTokens(address _who) function.
